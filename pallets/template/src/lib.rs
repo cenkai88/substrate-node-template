@@ -8,6 +8,7 @@ pub use pallet::*;
 pub mod pallet {
 	use frame_support::{pallet_prelude::*, storage::bounded_vec::BoundedVec};
 	use frame_system::pallet_prelude::*;
+	use pallet_timestamp::{self as timestamp};
 
 	// Define the pallet struct placeholder, various pallet function are implemented on it.
 	#[pallet::pallet]
@@ -16,7 +17,7 @@ pub mod pallet {
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]   // <-- Step 2. code block will replace this.
-	pub trait Config: frame_system::Config {
+	pub trait Config: frame_system::Config + timestamp::Config {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 		/// For constraining the maximum bytes of a hash used for any proof
@@ -51,7 +52,7 @@ pub mod pallet {
 		_,
 		Blake2_128Concat,
 		BoundedVec<u8, T::MaxBytesInHash>,
-		(T::AccountId, T::BlockNumber),
+		(T::AccountId, T::BlockNumber, BoundedVec<u8, T::MaxBytesInHash>, BoundedVec<u8, T::MaxBytesInHash>, <T as pallet_timestamp::Config>::Moment),
 		OptionQuery,
 	>;
 
@@ -60,10 +61,12 @@ pub mod pallet {
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]   // <-- Step 6. code block will replace this.
 	impl<T: Config> Pallet<T> {
-		#[pallet::weight(1_000)]
+		#[pallet::weight((1_000, Pays::No))]
 		pub fn create_claim(
 			origin: OriginFor<T>,
 			proof: BoundedVec<u8, T::MaxBytesInHash>,
+			user_id:  BoundedVec<u8, T::MaxBytesInHash>,
+			extra_str:  BoundedVec<u8, T::MaxBytesInHash>,
 		) -> DispatchResult {
 			// Check that the extrinsic was signed and get the signer.
 			// This function will return an error if the extrinsic is not signed.
@@ -75,17 +78,18 @@ pub mod pallet {
 
 			// Get the block number from the FRAME System pallet.
 			let current_block = <frame_system::Pallet<T>>::block_number();
+			let now_ts = <timestamp::Pallet<T>>::get();
 
 			// Store the proof with the sender and block number.
-			Proofs::<T>::insert(&proof, (&sender, current_block));
+			Proofs::<T>::insert(&proof, (&sender, current_block, &user_id, &extra_str, now_ts));
 
 			// Emit an event that the claim was created.
 			Self::deposit_event(Event::ClaimCreated(sender, proof));
 
-			Ok(())
+			Ok(().into())
 		}
 
-		#[pallet::weight(10_000)]
+		#[pallet::weight((10_000, Pays::No))]
 		pub fn revoke_claim(
 			origin: OriginFor<T>,
 			proof: BoundedVec<u8, T::MaxBytesInHash>,
@@ -100,7 +104,7 @@ pub mod pallet {
 
 			// Get owner of the claim.
 			// Panic condition: there is no way to set a `None` owner, so this must always unwrap.
-			let (owner, _) = Proofs::<T>::get(&proof).expect("All proofs must have an owner!");
+			let (owner, _, _2, _3, _4) = Proofs::<T>::get(&proof).expect("All proofs must have an owner!");
 
 			// Verify that sender of the current call is the claim owner.
 			ensure!(sender == owner, Error::<T>::NotProofOwner);
@@ -110,7 +114,7 @@ pub mod pallet {
 
 			// Emit an event that the claim was erased.
 			Self::deposit_event(Event::ClaimRevoked(sender, proof));
-			Ok(())
+			Ok(().into())
 		}
 	}
 }
